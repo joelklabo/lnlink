@@ -34,7 +34,7 @@ public enum TipSelection {
 
 public enum PayState {
     case initial
-    case decoding(LNSocket?, String)
+    case decoding(LNSocket?, DecodeType)
     case decoded(DecodeType)
     case ready(ReadyInvoice)
     case offer_input(ReadyInvoice, Decode)
@@ -43,7 +43,6 @@ public enum PayState {
 struct PayView: View {
     let init_decode_type: DecodeType
     let lnlink: LNLink
-    let init_invoice_str: String
 
     let expiry_timer = Timer.publish(every: 1, on: .main, in: .default).autoconnect()
 
@@ -59,9 +58,8 @@ struct PayView: View {
 
     @Environment(\.presentationMode) var presentationMode
 
-    init(invoice_str: String, decode_type: DecodeType, lnlink: LNLink) {
-        self.init_invoice_str = invoice_str
-        self.init_decode_type = decode_type
+    init(decode: DecodeType, lnlink: LNLink) {
+        self.init_decode_type = decode
         self.lnlink = lnlink
     }
 
@@ -399,10 +397,10 @@ struct PayView: View {
             case .offer_input:
                 break
             case .initial:
-                switch_state(.decoding(nil, self.init_invoice_str))
-            case .decoding(let ln, let inv):
+                switch_state(.decoding(nil, self.init_decode_type))
+            case .decoding(let ln, let decode):
                 DispatchQueue.global(qos: .background).async {
-                    self.handle_decode(ln, inv: inv)
+                    self.handle_decode(ln, decode: decode)
                 }
             case .decoded:
                 break
@@ -420,12 +418,28 @@ struct PayView: View {
         }
     }
 
-    func handle_decode(_ oldln: LNSocket?, inv: String) {
+    func handle_lnurl_decode(_ lnurl: LNUrl) {
+        let data = lnurl.encoded.dat
+        let strdata = String(decoding: data, as: UTF8.self)
+        print("lnurl data: '\(strdata)'")
+    }
+
+    func handle_decode(_ oldln: LNSocket?, decode: DecodeType) {
         let ln = oldln ?? LNSocket()
         if oldln == nil {
             guard ln.connect_and_init(node_id: self.lnlink.node_id, host: self.lnlink.host) else {
                 return
             }
+        }
+
+        var inv = ""
+        switch decode {
+        case .offer(let s):
+            inv = s
+        case .invoice(_, let s):
+            inv = s
+        case .lnurl(let lnurl):
+            return handle_lnurl_decode(lnurl)
         }
 
         switch rpc_decode(ln: ln, token: self.lnlink.token, inv: inv) {

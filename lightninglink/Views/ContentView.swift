@@ -30,7 +30,7 @@ enum ActiveAlert: Identifiable {
         }
     }
 
-    case pay(DecodeType, String)
+    case pay(DecodeType)
 }
 
 public enum ActiveSheet: Identifiable {
@@ -44,7 +44,7 @@ public enum ActiveSheet: Identifiable {
     }
 
     case qr
-    case pay(DecodeType, String)
+    case pay(DecodeType)
 }
 
 struct Funds {
@@ -113,14 +113,14 @@ struct ContentView: View {
     }
 
     func check_pay() {
-        guard let (amt, inv) = get_clipboard_invoice() else {
+        guard let decode = get_clipboard_invoice() else {
             self.active_sheet = .qr
             self.has_alert = false
             return
         }
 
         self.active_sheet = nil
-        self.active_alert = .pay(amt, inv)
+        self.active_alert = .pay(decode)
         self.has_alert = true
     }
 
@@ -150,7 +150,7 @@ struct ContentView: View {
 
                     Spacer()
                 }
-                }
+            }
             .padding()
 
             Spacer()
@@ -167,6 +167,7 @@ struct ContentView: View {
             }
 
             Spacer()
+
             HStack {
                 Spacer()
                 Button("Pay", action: check_pay)
@@ -184,8 +185,8 @@ struct ContentView: View {
                 self.has_alert = false
                 self.active_alert = nil
                 switch alert {
-                case .pay(let amt, let inv):
-                    self.active_sheet = .pay(amt, inv)
+                case .pay(let decode):
+                    self.active_sheet = .pay(decode)
                 }
             }
         }
@@ -204,8 +205,8 @@ struct ContentView: View {
 
                 }
 
-            case .pay(let decode_type, let raw):
-                PayView(invoice_str: raw, decode_type: decode_type, lnlink: self.lnlink)
+            case .pay(let decode):
+                PayView(decode: decode, lnlink: self.lnlink)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .sentPayment)) { payment in
@@ -217,12 +218,14 @@ struct ContentView: View {
             self.is_reset = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .donate)) { _ in
-            self.active_sheet = .pay(.offer, "lno1pfsycnjvd9hxkgrfwvsxvun9v5s8xmmxw3mkzun9yysyyateypkk2grpyrcflrd6ypek7gzfyp3kzm3qvdhkuarfde6k2grd0ysxzmrrda5x7mrfwdkj6en4v4kx2epqvdhkg6twvusxzerkv4h8gatjv4eju9q2d3hxc6twdvhxzursrcs08sggen2ndwzjdpqlpfw9sgfth8n9sjs7kjfssrnurnp5lqk66u0sgr32zxwrh0kmxnvmt5hyn0my534209573mp9ck5ekvywvugm5x3kq8ztex8yumafeft0arh6dke04jqgckmdzekqxegxzhecl23lurrj")
+            let offer: DecodeType = .offer("lno1pfsycnjvd9hxkgrfwvsxvun9v5s8xmmxw3mkzun9yysyyateypkk2grpyrcflrd6ypek7gzfyp3kzm3qvdhkuarfde6k2grd0ysxzmrrda5x7mrfwdkj6en4v4kx2epqvdhkg6twvusxzerkv4h8gatjv4eju9q2d3hxc6twdvhxzursrcs08sggen2ndwzjdpqlpfw9sgfth8n9sjs7kjfssrnurnp5lqk66u0sgr32zxwrh0kmxnvmt5hyn0my534209573mp9ck5ekvywvugm5x3kq8ztex8yumafeft0arh6dke04jqgckmdzekqxegxzhecl23lurrj")
+            self.active_sheet = .pay(offer)
         }
         .onOpenURL() { url in
             handle_scan(url.absoluteString)
         }
         .onAppear() {
+            refresh_funds()
             if scan_invoice != nil {
                 handle_scan(scan_invoice!)
                 scan_invoice = nil
@@ -234,7 +237,7 @@ struct ContentView: View {
         }
 
     }
-    
+
     func handle_scan(_ str: String) {
         switch handle_qrcode(str) {
         case .left(let err):
@@ -242,11 +245,14 @@ struct ContentView: View {
             break
         case .right(let scanres):
             switch scanres {
-            case .lightning(let decode, let invstr):
-                self.active_sheet = .pay(decode, invstr)
+            case .lightning(let decode):
+                self.active_sheet = .pay(decode)
             case .lnlink:
                 print("got a lnlink, not an invoice")
                 // TODO: report that this is an lnlink, not an invoice
+            case .lnurl(let lnurl):
+                let decode: DecodeType = .lnurl(lnurl)
+                self.active_sheet = .pay(decode)
             }
         }
     }
@@ -270,39 +276,8 @@ struct ContentView_Previews: PreviewProvider {
 }
  */
 
-public enum LNScanResult {
-    case lightning(DecodeType, String)
-    case lnlink(LNLink)
-}
 
-
-func handle_qrcode(_ qr: String) -> Either<String, LNScanResult> {
-    var invstr = qr.trimmingCharacters(in: .whitespacesAndNewlines)
-    let lowered = invstr.lowercased()
-    
-    if lowered.starts(with: "lnlink:") {
-        switch parse_auth_qr(invstr) {
-        case .left(let err):
-            return .left(err)
-        case .right(let lnlink):
-            return .right(.lnlink(lnlink))
-        }
-    }
-    
-    if lowered.starts(with: "lightning:") {
-        let index = invstr.index(invstr.startIndex, offsetBy: 10)
-        invstr = String(lowered[index...])
-    }
-    
-    guard let parsed = parseInvoiceString(invstr) else {
-        return .left("Failed to parse invoice")
-    }
-    
-    return .right(.lightning(parsed, invstr))
-}
-
-
-func get_clipboard_invoice() -> (DecodeType, String)? {
+func get_clipboard_invoice() -> DecodeType? {
     guard let inv = UIPasteboard.general.string else {
         return nil
     }
@@ -311,5 +286,5 @@ func get_clipboard_invoice() -> (DecodeType, String)? {
         return nil
     }
 
-    return (amt, inv)
+    return amt
 }
